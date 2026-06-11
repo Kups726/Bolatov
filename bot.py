@@ -1,116 +1,318 @@
 import os
 import random
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import sqlite3
 
-TOKEN = os.getenv("TOKEN")
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 
-subjects = {
-    "Информатика": ["5", "6", "7", "8", "9", "10", "11"],
-    "Математика": ["5", "6", "7", "8", "9", "10", "11"]
-}
+from openpyxl import Workbook
 
+TOKEN = os.environ.get("TOKEN")
+
+# =========================
+# ADMIN SAFE
+# =========================
+raw_admins = os.environ.get("ADMIN_IDS", "")
+
+ADMIN_IDS = (
+    list(map(int, raw_admins.split(",")))
+    if raw_admins.strip()
+    else []
+)
+
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
+
+# =========================
+# DATABASE
+# =========================
+conn = sqlite3.connect("quiz.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    score INTEGER DEFAULT 0,
+    correct_answers INTEGER DEFAULT 0,
+    wrong_answers INTEGER DEFAULT 0
+)
+""")
+conn.commit()
+
+# =========================
+# QUESTION BANK (20 ВОПРОСОВ НА КЛАСС)
+# =========================
 question_bank = {
+
     "Информатика": {
+
         "5": [
-            {"question": "Что такое компьютер?", "options": ["Электронное устройство", "Игрушка", "Телефон", "Книга"], "answer": "Электронное устройство"},
-            {"question": "Что такое интернет?", "options": ["Сеть", "Игра", "Файл", "Папка"], "answer": "Сеть"},
-            {"question": "Что делает мышь?", "options": ["Управляет курсором", "Печатает", "Сканирует", "Считает"], "answer": "Управляет курсором"},
-            {"question": "Что такое монитор?", "options": ["Экран", "Принтер", "Клавиатура", "Мышь"], "answer": "Экран"},
-            {"question": "Что такое клавиатура?", "options": ["Устройство ввода", "Экран", "Программа", "Файл"], "answer": "Устройство ввода"},
-            {"question": "Что хранит компьютер?", "options": ["Данные", "Игры", "Книги", "Людей"], "answer": "Данные"},
-            {"question": "Что такое файл?", "options": ["Данные", "Монитор", "Игра", "Кнопка"], "answer": "Данные"},
-            {"question": "Что такое папка?", "options": ["Хранилище файлов", "Игра", "Монитор", "Клавиша"], "answer": "Хранилище файлов"},
-            {"question": "Что делает принтер?", "options": ["Печатает", "Сканирует", "Удаляет", "Копирует"], "answer": "Печатает"},
-            {"question": "Что такое пароль?", "options": ["Защита", "Игра", "Файл", "Кнопка"], "answer": "Защита"}
+            {"q": "Что такое компьютер?", "o": ["Устройство для обработки информации", "Игрушка", "Книга", "Телевизор"], "a": "Устройство для обработки информации"},
+            {"q": "Что такое интернет?", "o": ["Сеть", "Игра", "Файл", "Книга"], "a": "Сеть"},
+            {"q": "Что делает клавиатура?", "o": ["Ввод текста", "Вывод звука", "Печать", "Хранение"], "a": "Ввод текста"},
+            {"q": "Что такое монитор?", "o": ["Экран", "Мышь", "Клавиатура", "Принтер"], "a": "Экран"},
+            {"q": "Что такое мышь?", "o": ["Устройство управления", "Экран", "Файл", "Папка"], "a": "Устройство управления"},
+            {"q": "Что такое файл?", "o": ["Данные", "Монитор", "Мышь", "Клавиатура"], "a": "Данные"},
+            {"q": "Что такое папка?", "o": ["Хранилище файлов", "Игра", "Экран", "Книга"], "a": "Хранилище файлов"},
+            {"q": "Что такое процессор?", "o": ["Мозг компьютера", "Экран", "Мышь", "Файл"], "a": "Мозг компьютера"},
+            {"q": "Что такое программа?", "o": ["Набор команд", "Игра", "Книга", "Экран"], "a": "Набор команд"},
+            {"q": "Что такое Windows?", "o": ["ОС", "Игра", "Файл", "Браузер"], "a": "ОС"},
+            {"q": "Что такое иконка?", "o": ["Значок", "Файл", "Папка", "Кнопка"], "a": "Значок"},
+            {"q": "Что такое меню?", "o": ["Список команд", "Игра", "Книга", "Файл"], "a": "Список команд"},
+            {"q": "Что такое браузер?", "o": ["Интернет программа", "Игра", "Книга", "Файл"], "a": "Интернет программа"},
+            {"q": "Что такое USB?", "o": ["Порт", "Игра", "Монитор", "Файл"], "a": "Порт"},
+            {"q": "Что такое сеть?", "o": ["Соединение устройств", "Книга", "Игра", "Файл"], "a": "Соединение устройств"},
+            {"q": "Что такое принтер?", "o": ["Печатает", "Играет", "Удаляет", "Хранит"], "a": "Печатает"},
+            {"q": "Что такое антивирус?", "o": ["Защита", "Игра", "Файл", "Экран"], "a": "Защита"},
+            {"q": "Что такое рабочий стол?", "o": ["Главный экран", "Папка", "Файл", "Игра"], "a": "Главный экран"},
+            {"q": "Что делает CPU?", "o": ["Обрабатывает данные", "Печатает", "Стирает", "Играет"], "a": "Обрабатывает данные"},
+            {"q": "Что такое данные?", "o": ["Информация", "Игра", "Книга", "Экран"], "a": "Информация"}
         ],
+
         "6": [
-            {"question": "Что такое Windows?", "options": ["ОС", "Игра", "Файл", "Браузер"], "answer": "ОС"},
-            {"question": "Что делает Ctrl+C?", "options": ["Копирует", "Удаляет", "Печатает", "Закрывает"], "answer": "Копирует"},
-            {"question": "Что делает Ctrl+V?", "options": ["Вставляет", "Удаляет", "Копирует", "Закрывает"], "answer": "Вставляет"},
-            {"question": "Что такое файл?", "options": ["Данные", "Игра", "Монитор", "Клавиатура"], "answer": "Данные"},
-            {"question": "Что такое папка?", "options": ["Хранилище", "Игра", "Монитор", "Кнопка"], "answer": "Хранилище"},
-            {"question": "Что делает мышь?", "options": ["Управляет", "Печатает", "Сканирует", "Удаляет"], "answer": "Управляет"},
-            {"question": "Что такое браузер?", "options": ["Интернет программа", "Игра", "Файл", "Папка"], "answer": "Интернет программа"},
-            {"question": "Что такое интернет?", "options": ["Сеть", "Игра", "Файл", "Монитор"], "answer": "Сеть"},
-            {"question": "Что такое YouTube?", "options": ["Видео сервис", "Игра", "Файл", "Папка"], "answer": "Видео сервис"},
-            {"question": "Что такое вирус?", "options": ["Опасная программа", "Игра", "Файл", "Монитор"], "answer": "Опасная программа"}
+            {"q": "Что такое HTML?", "o": ["Язык разметки", "Игра", "Файл", "ОС"], "a": "Язык разметки"},
+            {"q": "Что такое CSS?", "o": ["Стили", "Игра", "Файл", "ОС"], "a": "Стили"},
+            {"q": "Что такое JavaScript?", "o": ["Язык программирования", "Игра", "Файл", "ОС"], "a": "Язык программирования"},
+            {"q": "Что такое сайт?", "o": ["Страница", "Игра", "Файл", "ОС"], "a": "Страница"},
+            {"q": "Что такое сервер?", "o": ["Компьютер", "Игра", "Файл", "ОС"], "a": "Компьютер"},
+            {"q": "Что такое база данных?", "o": ["Хранилище", "Игра", "Файл", "ОС"], "a": "Хранилище"},
+            {"q": "Что такое IP?", "o": ["Адрес", "Игра", "Файл", "ОС"], "a": "Адрес"},
+            {"q": "Что такое Wi-Fi?", "o": ["Сеть", "Игра", "Файл", "ОС"], "a": "Сеть"},
+            {"q": "Что такое вирус?", "o": ["Вредоносная программа", "Игра", "Файл", "ОС"], "a": "Вредоносная программа"},
+            {"q": "Что такое облако?", "o": ["Хранение данных", "Игра", "Файл", "ОС"], "a": "Хранение данных"},
+            {"q": "Что такое Excel?", "o": ["Таблица", "Игра", "Файл", "ОС"], "a": "Таблица"},
+            {"q": "Что такое Word?", "o": ["Текст", "Игра", "Файл", "ОС"], "a": "Текст"},
+            {"q": "Что такое Git?", "o": ["Контроль версий", "Игра", "Файл", "ОС"], "a": "Контроль версий"},
+            {"q": "Что такое FTP?", "o": ["Передача файлов", "Игра", "Файл", "ОС"], "a": "Передача файлов"},
+            {"q": "Что такое DNS?", "o": ["Домены", "Игра", "Файл", "ОС"], "a": "Домены"},
+            {"q": "Что такое кэш?", "o": ["Память", "Игра", "Файл", "ОС"], "a": "Память"},
+            {"q": "Что такое API?", "o": ["Интерфейс", "Игра", "Файл", "ОС"], "a": "Интерфейс"},
+            {"q": "Что такое протокол?", "o": ["Правила", "Игра", "Файл", "ОС"], "a": "Правила"},
+            {"q": "Что такое VPN?", "o": ["Защищённая сеть", "Игра", "Файл", "ОС"], "a": "Защищённая сеть"},
+            {"q": "Что такое резервная копия?", "o": ["Backup", "Игра", "Файл", "ОС"], "a": "Backup"}
         ],
+
         "7": [
-            {"question": "Что такое Python?", "options": ["Язык", "Игра", "Файл", "Монитор"], "answer": "Язык"},
-            {"question": "Что делает print()?", "options": ["Вывод", "Удаление", "Копирование", "Создание"], "answer": "Вывод"},
-            {"question": "Что такое переменная?", "options": ["Хранилище", "Игра", "Файл", "Монитор"], "answer": "Хранилище"},
-            {"question": "Что такое цикл?", "options": ["Повторение", "Файл", "Монитор", "Игра"], "answer": "Повторение"},
-            {"question": "Что такое if?", "options": ["Условие", "Цикл", "Файл", "Монитор"], "answer": "Условие"},
-            {"question": "Что такое input()?", "options": ["Ввод", "Вывод", "Удаление", "Копирование"], "answer": "Ввод"},
-            {"question": "Что такое int?", "options": ["Число", "Текст", "Логика", "Файл"], "answer": "Число"},
-            {"question": "Что такое str?", "options": ["Текст", "Число", "Файл", "Монитор"], "answer": "Текст"},
-            {"question": "Что такое bool?", "options": ["Логика", "Число", "Текст", "Файл"], "answer": "Логика"},
-            {"question": "Что делает len()?", "options": ["Считает", "Удаляет", "Копирует", "Создает"], "answer": "Считает"}
-        ],
-        "8": [
-            {"question": "Что такое алгоритм?", "options": ["План", "Игра", "Файл", "Монитор"], "answer": "План"},
-            {"question": "Что такое массив?", "options": ["Список", "Число", "Текст", "Файл"], "answer": "Список"},
-            {"question": "Что такое функция?", "options": ["Блок кода", "Игра", "Файл", "Монитор"], "answer": "Блок кода"},
-            {"question": "Что делает return?", "options": ["Возвращает", "Удаляет", "Создает", "Печатает"], "answer": "Возвращает"},
-            {"question": "Что такое библиотека?", "options": ["Набор функций", "Игра", "Файл", "Монитор"], "answer": "Набор функций"},
-            {"question": "Что такое класс?", "options": ["Шаблон", "Игра", "Файл", "Монитор"], "answer": "Шаблон"},
-            {"question": "Что такое объект?", "options": ["Экземпляр", "Игра", "Файл", "Монитор"], "answer": "Экземпляр"},
-            {"question": "Что такое API?", "options": ["Интерфейс", "Игра", "Файл", "Монитор"], "answer": "Интерфейс"},
-            {"question": "Что такое база данных?", "options": ["Хранилище", "Игра", "Монитор", "Файл"], "answer": "Хранилище"},
-            {"question": "Что такое сервер?", "options": ["Компьютер", "Игра", "Файл", "Монитор"], "answer": "Компьютер"}
+            {"q": "Что такое Python?", "o": ["Язык программирования", "Игра", "Файл", "ОС"], "a": "Язык программирования"},
+            {"q": "Что такое переменная?", "o": ["Хранение данных", "Игра", "Файл", "ОС"], "a": "Хранение данных"},
+            {"q": "Что такое цикл?", "o": ["Повтор действий", "Игра", "Файл", "ОС"], "a": "Повтор действий"},
+            {"q": "Что такое функция?", "o": ["Блок кода", "Игра", "Файл", "ОС"], "a": "Блок кода"},
+            {"q": "Что такое список?", "o": ["Набор элементов", "Игра", "Файл", "ОС"], "a": "Набор элементов"},
+            {"q": "Что такое условие?", "o": ["if", "Игра", "Файл", "ОС"], "a": "if"},
+            {"q": "Что такое класс?", "o": ["Шаблон", "Игра", "Файл", "ОС"], "a": "Шаблон"},
+            {"q": "Что такое объект?", "o": ["Экземпляр", "Игра", "Файл", "ОС"], "a": "Экземпляр"},
+            {"q": "Что такое библиотека?", "o": ["Функции", "Игра", "Файл", "ОС"], "a": "Функции"},
+            {"q": "Что такое баг?", "o": ["Ошибка", "Игра", "Файл", "ОС"], "a": "Ошибка"},
+            {"q": "Что такое отладка?", "o": ["Debug", "Игра", "Файл", "ОС"], "a": "Debug"},
+            {"q": "Что такое алгоритм?", "o": ["План", "Игра", "Файл", "ОС"], "a": "План"},
+            {"q": "Что такое IDE?", "o": ["Среда разработки", "Игра", "Файл", "ОС"], "a": "Среда разработки"},
+            {"q": "Что такое компилятор?", "o": ["Перевод кода", "Игра", "Файл", "ОС"], "a": "Перевод кода"},
+            {"q": "Что такое массив?", "o": ["Структура данных", "Игра", "Файл", "ОС"], "a": "Структура данных"},
+            {"q": "Что такое рекурсия?", "o": ["Функция себя вызывает", "Игра", "Файл", "ОС"], "a": "Функция себя вызывает"},
+            {"q": "Что такое API?", "o": ["Интерфейс", "Игра", "Файл", "ОС"], "a": "Интерфейс"},
+            {"q": "Что такое JSON?", "o": ["Формат данных", "Игра", "Файл", "ОС"], "a": "Формат данных"},
+            {"q": "Что такое сервер?", "o": ["Машина данных", "Игра", "Файл", "ОС"], "a": "Машина данных"},
+            {"q": "Что такое Git?", "o": ["Контроль версий", "Игра", "Файл", "ОС"], "a": "Контроль версий"}
         ]
     }
 }
 
+# =========================
+# STATE
+# =========================
 user_state = {}
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [["Информатика", "Математика"]]
-    await update.message.reply_text("Выбери предмет:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+# =========================
+# DB
+# =========================
+def add_user(user_id, username):
+    cursor.execute("INSERT OR IGNORE INTO users VALUES (?, ?, 0, 0, 0)", (user_id, username))
+    conn.commit()
 
-async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+def update_score(user_id, correct):
+    if correct:
+        cursor.execute("UPDATE users SET score=score+1, correct_answers=correct_answers+1 WHERE user_id=?", (user_id,))
+    else:
+        cursor.execute("UPDATE users SET wrong_answers=wrong_answers+1 WHERE user_id=?", (user_id,))
+    conn.commit()
+
+# =========================
+# EXCEL
+# =========================
+def export_excel():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Results"
+
+    ws.append(["Username", "Score", "Correct", "Wrong"])
+
+    cursor.execute("SELECT username, score, correct_answers, wrong_answers FROM users")
+    for row in cursor.fetchall():
+        ws.append(row)
+
+    wb.save("results.xlsx")
+
+# =========================
+# START
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+    add_user(user.id, user.username)
+
+    keyboard = [
+        [InlineKeyboardButton("📘 Информатика", callback_data="sub_Информатика")]
+    ]
+
+    await update.message.reply_text(
+        "📚 Выбери предмет:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# =========================
+# QUIZ
+# =========================
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    data = query.data
+
+    if data.startswith("sub_"):
+        user_state[user_id] = {"subject": "Информатика"}
+
+        keyboard = [
+            [InlineKeyboardButton("5 класс", callback_data="cls_5")],
+            [InlineKeyboardButton("6 класс", callback_data="cls_6")],
+            [InlineKeyboardButton("7 класс", callback_data="cls_7")]
+        ]
+
+        await query.message.reply_text("Выбери класс:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    if data.startswith("cls_"):
+        class_num = data.replace("cls_", "")
+
+        subject = "Информатика"
+        pool = question_bank[subject][class_num]
+
+        user_state[user_id] = {
+            "subject": subject,
+            "class": class_num,
+            "pool": random.sample(pool, len(pool)),
+            "index": 0,
+            "score_local": 0
+        }
+
+        await send_question(query.message, user_id)
+        return
+
+    if user_id in user_state:
+        state = user_state[user_id]
+        q = state["pool"][state["index"]]
+
+        if data == q["a"]:
+            update_score(user_id, True)
+            state["score_local"] += 1
+            await query.message.reply_text("✅ Верно!")
+        else:
+            await query.message.reply_text(f"❌ Неверно! Ответ: {q['a']}")
+
+        state["index"] += 1
+        await send_question(query.message, user_id)
+
+# =========================
+async def send_question(message, user_id):
+
+    state = user_state[user_id]
+    i = state["index"]
+    pool = state["pool"]
+
+    if i >= len(pool):
+        await message.reply_text(
+            f"🏁 Тест завершён!\n📊 Правильных: {state['score_local']}/{len(pool)}"
+        )
+        return
+
+    q = pool[i]
+    keyboard = [[InlineKeyboardButton(o, callback_data=o)] for o in q["o"]]
+
+    await message.reply_text(f"❓ {q['q']}", reply_markup=InlineKeyboardMarkup(keyboard))
+
+# =========================
+# ADMIN PANEL
+# =========================
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Нет доступа")
+        return
+
+    keyboard = [
+        ["📊 Статистика"],
+        ["📁 Excel отчет"],
+        ["🏆 Топ пользователей"]
+    ]
+
+    await update.message.reply_text(
+        "👨‍🏫 Админ панель:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+# =========================
+async def admin_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
     text = update.message.text
 
-    if text in subjects:
-        user_state[user_id] = {"subject": text}
-        keyboard = [[c] for c in subjects[text]]
-        await update.message.reply_text("Выбери класс:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    if not is_admin(user_id):
         return
 
-    if user_id in user_state and "class" not in user_state[user_id]:
-        subject = user_state[user_id]["subject"]
-        if text in subjects[subject]:
-            user_state[user_id]["class"] = text
-            q = random.choice(question_bank[subject][text])
-            user_state[user_id]["question"] = q
-            keyboard = [[o] for o in q["options"]]
-            await update.message.reply_text(q["question"], reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-        return
+    if text == "📊 Статистика":
+        cursor.execute("SELECT COUNT(*), SUM(score) FROM users")
+        data = cursor.fetchone()
+        await update.message.reply_text(f"👥 Пользователей: {data[0]}\n🏆 Баллы: {data[1]}")
 
-    if user_id in user_state and "question" in user_state[user_id]:
-        q = user_state[user_id]["question"]
-        if text == q["answer"]:
-            await update.message.reply_text("✅ Правильно!")
-        else:
-            await update.message.reply_text(f"❌ Неправильно! Ответ: {q['answer']}")
+    elif text == "📁 Excel отчет":
+        export_excel()
+        await update.message.reply_document(open("results.xlsx", "rb"))
 
-        subject = user_state[user_id]["subject"]
-        class_ = user_state[user_id]["class"]
-        q = random.choice(question_bank[subject][class_])
-        user_state[user_id]["question"] = q
+    elif text == "🏆 Топ пользователей":
+        cursor.execute("SELECT username, score FROM users ORDER BY score DESC LIMIT 10")
+        top = cursor.fetchall()
 
-        keyboard = [[o] for o in q["options"]]
-        await update.message.reply_text(q["question"], reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+        text_top = "🏆 ТОП:\n\n"
+        for i, row in enumerate(top, 1):
+            text_top += f"{i}. {row[0]} — {row[1]}\n"
 
-async def main():
+        await update.message.reply_text(text_top)
+
+# =========================
+# MAIN
+# =========================
+def main():
+
     app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handler))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_buttons))
+
     print("Bot started")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
